@@ -1,0 +1,188 @@
+
+<!DOCTYPE html>
+<html lang="" class="loading">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dodge&#39;s Blog</title>
+
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="google" content="notranslate" />
+    <meta name="keywords" content="Fechin,"> 
+    <meta name="description" content="记录项目中利用Glide显示Gif时，选择缓存策略为DiskCacheStrategy.RESOURC时遇到的一些问题。
+需求背景项目中有个九宫格的控件，需要展示图片和Gif。如果是Gif图片，则依,"> 
+    <meta name="author" content="Dodge"> 
+    <link rel="alternative" href="atom.xml" title="Dodge&#39;s Blog" type="application/atom+xml"> 
+    <link rel="icon" href="/img/favicon.png"> 
+    <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.css">
+    <link rel="stylesheet" href="/css/diaspora.css">
+    <script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+    <script>
+      (adsbygoogle = window.adsbygoogle || []).push({
+        google_ad_client: "ca-pub-8691406134231910",
+        enable_page_level_ads: true
+      });
+    </script>
+
+</head>
+
+<body class="loading">
+    <div id="loader"></div>
+    <div id="single">
+    <div id="top" style="display: block;">
+    <div class="bar" style="width: 0;"></div>
+    <a class="icon-home image-icon" href="javascript:;"></a>
+    <div title="播放/暂停" class="icon-play"></div>
+    <h3 class="subtitle">Glide中Gif和DiskCacheStrategy.RESOURCE的一些误会</h3>
+    <div class="social">
+        <!--<div class="like-icon">-->
+            <!--<a href="javascript:;" class="likeThis active"><span class="icon-like"></span><span class="count">76</span></a>-->
+        <!--</div>-->
+        <div>
+            <div class="share">
+                <a title="获取二维码" class="icon-scan" href="javascript:;"></a>
+            </div>
+            <div id="qr"></div>
+        </div>
+    </div>
+    <div class="scrollbar"></div>
+</div>
+    <div class="section">
+        <div class="article">
+    <div class='main'>
+        <h1 class="title">Glide中Gif和DiskCacheStrategy.RESOURCE的一些误会</h1>
+        <div class="stuff">
+            <span>八月 12, 2018</span>
+            
+  <ul class="post-tags-list"><li class="post-tags-list-item"><a class="post-tags-list-link" href="/tags/Android-Glide/">Android,Glide</a></li></ul>
+
+
+        </div>
+        <div class="content markdown">
+            <p>记录项目中利用Glide显示Gif时，选择缓存策略为DiskCacheStrategy.RESOURC时遇到的一些问题。</p>
+<h3 id="需求背景"><a href="#需求背景" class="headerlink" title="需求背景"></a>需求背景</h3><p>项目中有个九宫格的控件，需要展示图片和Gif。如果是Gif图片，则依次播放。当所有Gif图片播放完后，再从第1个开始重复播放。</p>
+<h3 id="发现问题"><a href="#发现问题" class="headerlink" title="发现问题"></a>发现问题</h3><p>图片加载过程中有加载进度的loading动画，于是发现没次重复播放的时候，Gif图片都会从网络加载，而不是读取缓存数据。</p>
+<h3 id="探索过程"><a href="#探索过程" class="headerlink" title="探索过程"></a>探索过程</h3><p>带着各种疑惑我们先看下加载Gif图片的代码片段</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">RequestOptions options = <span class="keyword">new</span> RequestOptions();</span><br><span class="line">options.diskCacheStrategy(DiskCacheStrategy.RESOURCE)</span><br><span class="line">        .skipMemoryCache(<span class="keyword">true</span>); <span class="comment">// 禁用内存缓存</span></span><br><span class="line">Glide.with(<span class="keyword">this</span>).asGif()</span><br><span class="line">      .apply(options)</span><br><span class="line">      .load(url)</span><br><span class="line">      .into(view);</span><br></pre></td></tr></table></figure>
+<p>我怎么看也没太大问题呢=。=</p>
+<hr>
+<h4 id="先上结论：Gif-在解码后缓存文件的-key-和再次请求时，查询文件缓存所用的-key-是两个不同类型的-key，从而导致无法命中缓存。"><a href="#先上结论：Gif-在解码后缓存文件的-key-和再次请求时，查询文件缓存所用的-key-是两个不同类型的-key，从而导致无法命中缓存。" class="headerlink" title="先上结论：Gif 在解码后缓存文件的 key 和再次请求时，查询文件缓存所用的 key 是两个不同类型的 key，从而导致无法命中缓存。"></a>先上结论：Gif 在解码后缓存文件的 key 和再次请求时，查询文件缓存所用的 key 是两个不同类型的 key，从而导致无法命中缓存。</h4><p>接下来我试着分析 Gif 图片请求的过程，逐步揭晓 Gif 在请求过程中是如何存储、命中缓存的。</p>
+<p>先看看Glide中默认的几种缓存配置</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment">* Caches remote data with both &#123;<span class="doctag">@link</span> #DATA&#125; and &#123;<span class="doctag">@link</span> #RESOURCE&#125;, and local data with</span></span><br><span class="line"><span class="comment">* &#123;<span class="doctag">@link</span> #RESOURCE&#125; only.</span></span><br><span class="line"><span class="comment">*/</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> DiskCacheStrategy ALL;</span><br><span class="line"></span><br><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment">* Writes retrieved data directly to the disk cache before it's decoded.</span></span><br><span class="line"><span class="comment">*/</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> DiskCacheStrategy DATA;</span><br><span class="line"></span><br><span class="line"> <span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Writes resources to disk after they've been decoded.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> DiskCacheStrategy RESOURCE;</span><br></pre></td></tr></table></figure>
+<p>首先我们找到 Glide 请求的关键入口 Engine 类的 load() 方法</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br></pre></td><td class="code"><pre><span class="line"></span><br><span class="line"><span class="keyword">long</span> startTime = VERBOSE_IS_LOGGABLE ? LogTime.getLogTime() : <span class="number">0</span>;</span><br><span class="line"><span class="comment">// 首先会构建缓存的key</span></span><br><span class="line">EngineKey key = keyFactory.buildKey(model, signature, width, height, transformations,</span><br><span class="line">    resourceClass, transcodeClass, options);</span><br><span class="line"><span class="comment">// 这里会先进行一次缓存查询</span></span><br><span class="line">EngineResource&lt;?&gt; active = loadFromActiveResources(key, isMemoryCacheable);</span><br><span class="line"><span class="keyword">if</span> (active != <span class="keyword">null</span>) &#123;</span><br><span class="line">  cb.onResourceReady(active, DataSource.MEMORY_CACHE);</span><br><span class="line">  <span class="keyword">if</span> (VERBOSE_IS_LOGGABLE) &#123;</span><br><span class="line">    logWithTimeAndKey(<span class="string">"Loaded resource from active resources"</span>, startTime, key);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> <span class="keyword">null</span>;</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 这里会再进行一次缓存查询</span></span><br><span class="line">EngineResource&lt;?&gt; cached = loadFromCache(key, isMemoryCacheable);</span><br><span class="line"><span class="keyword">if</span> (cached != <span class="keyword">null</span>) &#123;</span><br><span class="line">  cb.onResourceReady(cached, DataSource.MEMORY_CACHE);</span><br><span class="line">  <span class="keyword">if</span> (VERBOSE_IS_LOGGABLE) &#123;</span><br><span class="line">    logWithTimeAndKey(<span class="string">"Loaded resource from cache"</span>, startTime, key);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> <span class="keyword">null</span>;</span><br><span class="line">&#125;</span><br><span class="line">...</span><br><span class="line">EngineJob&lt;R&gt; engineJob =</span><br><span class="line">  engineJobFactory.build(</span><br><span class="line">      key,</span><br><span class="line">      isMemoryCacheable,</span><br><span class="line">      useUnlimitedSourceExecutorPool,</span><br><span class="line">      useAnimationPool,</span><br><span class="line">      onlyRetrieveFromCache);</span><br><span class="line"></span><br><span class="line">DecodeJob&lt;R&gt; decodeJob =</span><br><span class="line">  decodeJobFactory.build(</span><br><span class="line">      glideContext,</span><br><span class="line">      model,</span><br><span class="line">      key,</span><br><span class="line">      signature,</span><br><span class="line">      width,</span><br><span class="line">      height,</span><br><span class="line">      resourceClass,</span><br><span class="line">      transcodeClass,</span><br><span class="line">      priority,</span><br><span class="line">      diskCacheStrategy,</span><br><span class="line">      transformations,</span><br><span class="line">      isTransformationRequired,</span><br><span class="line">      isScaleOnlyOrNoTransform,</span><br><span class="line">      onlyRetrieveFromCache,</span><br><span class="line">      options,</span><br><span class="line">      engineJob);</span><br><span class="line"></span><br><span class="line">jobs.put(key, engineJob);</span><br><span class="line"></span><br><span class="line">engineJob.addCallback(cb);</span><br><span class="line">engineJob.start(decodeJob);</span><br></pre></td></tr></table></figure>
+<p>由于我们加载 Gif 是的 Options 是禁用内存缓存的，所以可以跳过这部分，接下来看看数据提取和解码的部分</p>
+<p>不过多累赘，直接看 DecodeJob 的关键代码</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><span class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">runWrapped</span><span class="params">()</span> </span>&#123;</span><br><span class="line">  <span class="keyword">switch</span> (runReason) &#123;</span><br><span class="line">    <span class="keyword">case</span> INITIALIZE:</span><br><span class="line">      stage = getNextStage(Stage.INITIALIZE);</span><br><span class="line">      currentGenerator = getNextGenerator();</span><br><span class="line">      runGenerators();</span><br><span class="line">      <span class="keyword">break</span>;</span><br><span class="line">    <span class="keyword">case</span> SWITCH_TO_SOURCE_SERVICE:</span><br><span class="line">      runGenerators();</span><br><span class="line">      <span class="keyword">break</span>;</span><br><span class="line">    <span class="keyword">case</span> DECODE_DATA:</span><br><span class="line">      decodeFromRetrievedData();</span><br><span class="line">      <span class="keyword">break</span>;</span><br><span class="line">    <span class="keyword">default</span>:</span><br><span class="line">      <span class="keyword">throw</span> <span class="keyword">new</span> IllegalStateException(<span class="string">"Unrecognized run reason: "</span> + runReason);</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>这里会根据我们已经配置的缓存策略，进行数据提取。我们设置的是 Resource 缓存策略，getNextStage(Stage.INITIALIZE) 返回 stage = Stage.SOURCE , 最终 getNextGenerator() 方法会返回一个 ResourceCacheGenerator 对象。</p>
+<p>接下来，我们看看 ResourceCacheGenerator 是怎么读取缓存的数据的，我们找到 startNext() 方法。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">// 这里注意 currentKey 的类型</span></span><br><span class="line"><span class="keyword">private</span> ResourceCacheKey currentKey;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">startNext</span><span class="params">()</span> </span>&#123;</span><br><span class="line">    ...</span><br><span class="line">    currentKey =</span><br><span class="line">        <span class="keyword">new</span> ResourceCacheKey(<span class="comment">// NOPMD AvoidInstantiatingObjectsInLoops</span></span><br><span class="line">            helper.getArrayPool(),</span><br><span class="line">            sourceId,</span><br><span class="line">            helper.getSignature(),</span><br><span class="line">            helper.getWidth(),</span><br><span class="line">            helper.getHeight(),</span><br><span class="line">            transformation,</span><br><span class="line">            resourceClass,</span><br><span class="line">            helper.getOptions());</span><br><span class="line">    cacheFile = helper.getDiskCache().get(currentKey);</span><br><span class="line">    <span class="keyword">if</span> (cacheFile != <span class="keyword">null</span>) &#123;</span><br><span class="line">      sourceKey = sourceId;</span><br><span class="line">      modelLoaders = helper.getModelLoaders(cacheFile);</span><br><span class="line">      modelLoaderIndex = <span class="number">0</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h4 id="到这里，可以小结一下："><a href="#到这里，可以小结一下：" class="headerlink" title="到这里，可以小结一下："></a>到这里，可以小结一下：</h4><p><strong>Gif图片请求，如果配置的缓存策略是 RESOURCE，会通过 ResourceCacheGenerator 来提取数据，并且会根据请求，新建 ResourceCacheKey 作为 key 去磁盘缓存中读取缓存数据。这里需要留意，这个 key 的类型是 ResourceCacheKey。</strong></p>
+<hr>
+<p>Ok，那接下来，我们看看 Gif 在解码后是如何缓存文件的，这里我们直接定位到 DecodeJob 类的 onResourceDecoded() 方法，此方法会再解码后回调</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@Synthetic</span></span><br><span class="line"><span class="meta">@NonNull</span></span><br><span class="line">&lt;Z&gt; <span class="function">Resource&lt;Z&gt; <span class="title">onResourceDecoded</span><span class="params">(DataSource dataSource, @NonNull Resource&lt;Z&gt; decoded)</span> </span>&#123;</span><br><span class="line">  ...</span><br><span class="line">  <span class="keyword">final</span> EncodeStrategy encodeStrategy;</span><br><span class="line">  <span class="keyword">final</span> ResourceEncoder&lt;Z&gt; encoder;</span><br><span class="line">  <span class="keyword">if</span> (decodeHelper.isResourceEncoderAvailable(transformed)) &#123;</span><br><span class="line">    <span class="comment">//因为我们加载的是 Gif 图片，所以这里返回了一个 GifDrawableEncoder 对象</span></span><br><span class="line">    encoder = decodeHelper.getResultEncoder(transformed);</span><br><span class="line">    <span class="comment">//这 GifDrawableEncoder.getEncodeStrategy(options) 始终返回 SOURCE</span></span><br><span class="line">    encodeStrategy = encoder.getEncodeStrategy(options);</span><br><span class="line">  &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">    encoder = <span class="keyword">null</span>;</span><br><span class="line">    encodeStrategy = EncodeStrategy.NONE;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  Resource&lt;Z&gt; result = transformed;</span><br><span class="line">  <span class="keyword">boolean</span> isFromAlternateCacheKey = !decodeHelper.isSourceKey(currentSourceKey);</span><br><span class="line">  <span class="keyword">if</span> (diskCacheStrategy.isResourceCacheable(isFromAlternateCacheKey, dataSource, encodeStrategy)) &#123;</span><br><span class="line">    <span class="keyword">if</span> (encoder == <span class="keyword">null</span>) &#123;</span><br><span class="line">      <span class="keyword">throw</span> <span class="keyword">new</span> Registry.NoResultEncoderAvailableException(transformed.get().getClass());</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">final</span> Key key;</span><br><span class="line">    <span class="keyword">switch</span> (encodeStrategy) &#123;</span><br><span class="line">      <span class="keyword">case</span> SOURCE:</span><br><span class="line">        <span class="comment">// 于是我们可以发现，Gif 解码后，new 了一个 DataCacheKey 来保存数据</span></span><br><span class="line">        key = <span class="keyword">new</span> DataCacheKey(currentSourceKey, signature);</span><br><span class="line">        <span class="keyword">break</span>;</span><br><span class="line">      <span class="keyword">case</span> TRANSFORMED:</span><br><span class="line">        key = <span class="keyword">new</span> ResourceCacheKey(</span><br><span class="line">                decodeHelper.getArrayPool(),</span><br><span class="line">                currentSourceKey,</span><br><span class="line">                signature,</span><br><span class="line">                width,</span><br><span class="line">                height,</span><br><span class="line">                appliedTransformation,</span><br><span class="line">                resourceSubClass,</span><br><span class="line">                options);</span><br><span class="line">        <span class="keyword">break</span>;</span><br><span class="line">      <span class="keyword">default</span>:</span><br><span class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> IllegalArgumentException(<span class="string">"Unknown strategy: "</span> + encodeStrategy);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    LockedResource&lt;Z&gt; lockedResult = LockedResource.obtain(transformed);</span><br><span class="line">    <span class="comment">//这里会最终将文件写入缓存</span></span><br><span class="line">    deferredEncodeManager.init(key, encoder, lockedResult);</span><br><span class="line">    result = lockedResult;</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> result;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>简单看下 GifDrawableEncoder 的源码<br><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">/**</span></span><br><span class="line"><span class="comment"> * Writes the original bytes of a &#123;<span class="doctag">@link</span> com.bumptech.glide.load.resource.gif.GifDrawable&#125; to an</span></span><br><span class="line"><span class="comment"> * &#123;<span class="doctag">@link</span> java.io.OutputStream&#125;.</span></span><br><span class="line"><span class="comment"> */</span></span><br><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">GifDrawableEncoder</span> <span class="keyword">implements</span> <span class="title">ResourceEncoder</span>&lt;<span class="title">GifDrawable</span>&gt; </span>&#123;</span><br><span class="line">  <span class="keyword">private</span> <span class="keyword">static</span> <span class="keyword">final</span> String TAG = <span class="string">"GifEncoder"</span>;</span><br><span class="line"></span><br><span class="line">  <span class="meta">@NonNull</span></span><br><span class="line">  <span class="meta">@Override</span></span><br><span class="line">  <span class="function"><span class="keyword">public</span> EncodeStrategy <span class="title">getEncodeStrategy</span><span class="params">(@NonNull Options options)</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> EncodeStrategy.SOURCE;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="meta">@Override</span></span><br><span class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">encode</span><span class="params">(@NonNull Resource&lt;GifDrawable&gt; data, @NonNull File file,</span></span></span><br><span class="line"><span class="function"><span class="params">      @NonNull Options options)</span> </span>&#123;</span><br><span class="line">    GifDrawable drawable = data.get();</span><br><span class="line">    <span class="keyword">boolean</span> success = <span class="keyword">false</span>;</span><br><span class="line">    <span class="keyword">try</span> &#123;</span><br><span class="line">      ByteBufferUtil.toFile(drawable.getBuffer(), file);</span><br><span class="line">      success = <span class="keyword">true</span>;</span><br><span class="line">    &#125; <span class="keyword">catch</span> (IOException e) &#123;</span><br><span class="line">      <span class="keyword">if</span> (Log.isLoggable(TAG, Log.WARN)) &#123;</span><br><span class="line">        Log.w(TAG, <span class="string">"Failed to encode GIF drawable data"</span>, e);</span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> success;</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure></p>
+<h5 id="简单描述下-Gif-解码后，缓存数据的过程："><a href="#简单描述下-Gif-解码后，缓存数据的过程：" class="headerlink" title="简单描述下 Gif 解码后，缓存数据的过程："></a>简单描述下 Gif 解码后，缓存数据的过程：</h5><p><strong>数据解码后，会根据解码器和缓存策略来保存数据，由于 GifDrawableEncoder 默认的缓存方式是只缓存源数据，因此在写入文件缓存的时候，是新建了 DataCacheKey 类型的 key 来缓存数据的。</strong></p>
+<h3 id="回顾整个过程"><a href="#回顾整个过程" class="headerlink" title="回顾整个过程"></a>回顾整个过程</h3><ul>
+<li>首先，Gif 在解码成功后，由于 <strong>GifDrawableEncoder.getEncodeStrategy(options)</strong> 返回 <strong>SOURCE</strong> ，于是在写入缓存的时候新建了类型为 <strong>DataCacheKey</strong> 的 key。</li>
+<li>其次，我们的请求设置的是缓存策略是 Resource，于是在提取数据的时候，是通过 <strong>ResourceCacheGenerator</strong> 这个类来提取数据的</li>
+<li>然而，<strong>ResourceCacheGenerator</strong> 在提取数据的时候，是通过新建一个 <strong>ResourceCacheKey</strong> 去命中缓存的，这样，导致始终无法命中文件缓存，最终只能通过网络请求重新提取数据。</li>
+</ul>
+
+            <!--[if lt IE 9]><script>document.createElement('audio');</script><![endif]-->
+            <audio id="audio" loop="1" preload="auto" controls="controls" data-autoplay="false">
+                <source type="audio/mpeg" src="">
+            </audio>
+            
+                <ul id="audio-list" style="display:none">
+                    
+                        <li title='0' data-url='http://link.hhtjim.com/163/5146554.mp3'></li>
+                    
+                        <li title='1' data-url='http://link.hhtjim.com/qq/001faIUs4M2zna.mp3'></li>
+                    
+                </ul>
+            
+        </div>
+        
+    <div id='gitalk-container' class="comment link"
+        data-ae='false'
+        data-ci=''
+        data-cs=''
+        data-r=''
+        data-o=''
+        data-a=''
+        data-d='false'
+    >查看评论</div>
+
+
+    </div>
+    
+</div>
+
+
+    </div>
+</div>
+</body>
+<script src="//cdn.jsdelivr.net/npm/gitalk@1/dist/gitalk.min.js"></script>
+<script src="//lib.baomitu.com/jquery/1.8.3/jquery.min.js"></script>
+<script src="/js/plugin.js"></script>
+<script src="/js/diaspora.js"></script>
+<link rel="stylesheet" href="/photoswipe/photoswipe.css">
+<link rel="stylesheet" href="/photoswipe/default-skin/default-skin.css">
+<script src="/photoswipe/photoswipe.min.js"></script>
+<script src="/photoswipe/photoswipe-ui-default.min.js"></script>
+
+<!-- Root element of PhotoSwipe. Must have class pswp. -->
+<div class="pswp" tabindex="-1" role="dialog" aria-hidden="true">
+    <!-- Background of PhotoSwipe. 
+         It's a separate element as animating opacity is faster than rgba(). -->
+    <div class="pswp__bg"></div>
+    <!-- Slides wrapper with overflow:hidden. -->
+    <div class="pswp__scroll-wrap">
+        <!-- Container that holds slides. 
+            PhotoSwipe keeps only 3 of them in the DOM to save memory.
+            Don't modify these 3 pswp__item elements, data is added later on. -->
+        <div class="pswp__container">
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+            <div class="pswp__item"></div>
+        </div>
+        <!-- Default (PhotoSwipeUI_Default) interface on top of sliding area. Can be changed. -->
+        <div class="pswp__ui pswp__ui--hidden">
+            <div class="pswp__top-bar">
+                <!--  Controls are self-explanatory. Order can be changed. -->
+                <div class="pswp__counter"></div>
+                <button class="pswp__button pswp__button--close" title="Close (Esc)"></button>
+                <button class="pswp__button pswp__button--share" title="Share"></button>
+                <button class="pswp__button pswp__button--fs" title="Toggle fullscreen"></button>
+                <button class="pswp__button pswp__button--zoom" title="Zoom in/out"></button>
+                <!-- Preloader demo http://codepen.io/dimsemenov/pen/yyBWoR -->
+                <!-- element will get class pswp__preloader--active when preloader is running -->
+                <div class="pswp__preloader">
+                    <div class="pswp__preloader__icn">
+                      <div class="pswp__preloader__cut">
+                        <div class="pswp__preloader__donut"></div>
+                      </div>
+                    </div>
+                </div>
+            </div>
+            <div class="pswp__share-modal pswp__share-modal--hidden pswp__single-tap">
+                <div class="pswp__share-tooltip"></div> 
+            </div>
+            <button class="pswp__button pswp__button--arrow--left" title="Previous (arrow left)">
+            </button>
+            <button class="pswp__button pswp__button--arrow--right" title="Next (arrow right)">
+            </button>
+            <div class="pswp__caption">
+                <div class="pswp__caption__center"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+
+</html>
